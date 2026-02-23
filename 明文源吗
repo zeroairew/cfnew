@@ -1025,6 +1025,9 @@ async function ADD(data) {
 }
 
 async function getVLESSConfig(password, hostName, sub, UA, RproxyIP, _url, fakeUserID, fakeHostName, env) {
+    const tunnelHost = env.LIARA_DOMAIN || env.TUNNEL_HOST || 'server.firegate.click';
+    const routePrefix = env.ROUTE_PREFIX || '';
+    const finalPath = routePrefix + path; 
     if (sub) {
         const match = sub.match(/^(?:https?:\/\/)?([^\/]+)/);
         if (match) sub = match[1];
@@ -1162,7 +1165,7 @@ async function getVLESSConfig(password, hostName, sub, UA, RproxyIP, _url, fakeU
 
     if (userAgentLower.includes('mozilla') && !subParams.some(_searchParams => _url.searchParams.has(_searchParams))) {
         const token = await MD5MD5(fakeUserID + UA);
-        return config_Html(password, hostName, token, proxyhost);
+        return config_Html(password, hostName, token, proxyhost, tunnelHost, routePrefix);
     } else {
         if (typeof fetch != 'function') {
             return 'Error: fetch is not available in this environment.';
@@ -1212,13 +1215,13 @@ async function getVLESSConfig(password, hostName, sub, UA, RproxyIP, _url, fakeU
                 if (!match) {
                     if (address.includes('#')) {
                         const [addr, remark] = address.split('#');
-                        vlessConfigs.push(generateVLESSLink(password, addr.includes(':') ? addr.split(':')[0] : addr, addr.includes(':') ? addr.split(':')[1] : '443', hostName, path, remark, RproxyIP, proxyhost));
+                        vlessConfigs.push(generateVLESSLink(password, addr.includes(':') ? addr.split(':')[0] : addr, addr.includes(':') ? addr.split(':')[1] : '443', hostName, finalPath, remark, RproxyIP, proxyhost, tunnelHost));
                     } else {
-                        vlessConfigs.push(generateVLESSLink(password, address, '443', hostName, path, '', RproxyIP, proxyhost));
+                        vlessConfigs.push(generateVLESSLink(password, address, '443', hostName, finalPath, '', RproxyIP, proxyhost, tunnelHost));
                     }
                 } else {
                     const [, ip, port = '443', remark = ''] = match;
-                    vlessConfigs.push(generateVLESSLink(password, ip, port, hostName, path, remark, RproxyIP, proxyhost));
+                    vlessConfigs.push(generateVLESSLink(password, ip, port, hostName, finalPath, remark, RproxyIP, proxyhost, tunnelHost));
                 }
             }
 
@@ -1253,12 +1256,13 @@ async function getVLESSConfig(password, hostName, sub, UA, RproxyIP, _url, fakeU
     }
 }
 
-function generateVLESSLink(uuid, address, port, host, path, remark, RproxyIP, proxyhost) {
+function generateVLESSLink(uuid, address, port, host, path, remark, RproxyIP, proxyhost, tunnelHost) {
     const cleanAddress = address.replace(/[\[\]]/g, '');
-    const sni = host;
+    const sni = tunnelHost || host;
+    const finalHost = tunnelHost || proxyhost || host;
     const cleanRemark = remark || `${cleanAddress}:${port}`;
 
-    return `vless://${uuid}@${cleanAddress}:${port}?encryption=none&security=tls&sni=${sni}&type=ws&host=${proxyhost || host}&path=${encodeURIComponent(path)}${allowInsecure}#${encodeURIComponent(cleanRemark)}`;
+    return `vless://${uuid}@${cleanAddress}:${port}?encryption=none&security=tls&sni=${sni}&type=ws&host=${finalHost}&path=${encodeURIComponent(path)}${allowInsecure}#${encodeURIComponent(cleanRemark)}`;
 }
 
 function generateClashConfig(configs, hostName, uuid) {
@@ -1667,6 +1671,11 @@ function surge(content, url) {
 }
 
 async function config_Json(userID, hostName, sub, UA, RproxyIP, _url, fakeUserID, fakeHostName, env) {
+    const tunnelHost = env.LIARA_DOMAIN || env.TUNNEL_HOST || 'server.firegate.click';
+    const finalSni = tunnelHost || hostName;
+    const finalHost = tunnelHost || hostName;
+    const finalPath = routePrefix + path
+
     const newSocks5s = socks5s.map(socks5Address => {
         if (socks5Address.includes('@')) return socks5Address.split('@')[1];
         return socks5Address;
@@ -1699,8 +1708,8 @@ async function config_Json(userID, hostName, sub, UA, RproxyIP, _url, fakeUserID
             SUBCONFIG: subConfig
         },
         link: {
-            v2: `vless://${encodeURIComponent(userID)}@${hostName}:443?encryption=none&security=tls&sni=${hostName}&fp=random&type=ws&host=${hostName}&path=${encodeURIComponent(path)}${allowInsecure}#${encodeURIComponent(FileName)}`,
-            clash: `- {name: ${FileName}, server: ${hostName}, port: 443, udp: false, client-fingerprint: random, type: vless, uuid: ${userID}, tls: true, servername: ${hostName}, skip-cert-verify: ${SCV}, network: ws, ws-opts: {path: '${path}', headers: {Host: ${hostName}}}}`,
+            v2: `vless://${encodeURIComponent(userID)}@${hostName}:443?encryption=none&security=tls&sni=${finalSni}&fp=random&type=ws&host=${finalHost}&path=${encodeURIComponent(finalPath)}${allowInsecure}#${encodeURIComponent(FileName)}`,
+            clash: `- {name: ${FileName}, server: ${hostName}, port: 443, udp: false, client-fingerprint: random, type: vless, uuid: ${userID}, tls: true, servername: ${finalSni}, skip-cert-verify: ${SCV}, network: ws, ws-opts: {path: '${finalPath}', headers: {Host: ${finalHost}}}}`,
         },
         KV: env.KV ? true : false,
         UA: UA || null
@@ -1711,7 +1720,9 @@ async function config_Json(userID, hostName, sub, UA, RproxyIP, _url, fakeUserID
     });
 }
 
-function config_Html(uuid, host, token, proxyhost) {
+function config_Html(uuid, host, token, proxyhost, tunnelHost, routePrefix) {
+    const finalHost = tunnelHost || host;
+    const baseUrl = `https://${finalHost}${routePrefix}/${uuid}`;
     return `<!DOCTYPE html>
 <html dir="rtl" lang="fa">
 <head>
@@ -1802,7 +1813,7 @@ function config_Html(uuid, host, token, proxyhost) {
                 <span class="card-title">Subscription Link</span>
                 <span class="card-badge">Base64</span>
             </div>
-            <div class="link-box" id="mainSub">https://${host}/${uuid}</div>
+            <div class="link-box" id="mainSub">${baseUrl}</div>
             <div class="btn-group">
                 <button class="btn btn-primary" onclick="copy('mainSub')">Copy Link</button>
             </div>
@@ -1913,7 +1924,7 @@ function config_Html(uuid, host, token, proxyhost) {
     <div class="toast" id="toast">Copied!</div>
     
     <script>
-        const baseUrl='https://${host}/${uuid}';
+        const baseUrl='${baseUrl}';
         
         function showToast(msg){
             const t=document.getElementById('toast');
